@@ -114,7 +114,10 @@ do_the_reverse:
     move $t0, $s1     # input buffer memory address (start)
 
     li $a0, 11        # tracker for copying header (11 - words) 44/4 = 11
+
 copy_header:
+    move $t0, $s1               # Start of the input buffer (heap 1)
+    move $t1, $s7               # Start of the output buffer (heap 2)
 
     beqz $a0, done_copy_header
 
@@ -122,52 +125,50 @@ copy_header:
     sw $a1, 0($s7)
 
     sub $a0, $a0, 1
-    addi $t0, $t0, 4
-    addi $s7, $s7, 4
+    addi $t0, $t0, 4            # Move to the next word in input buffer
+    addi $t1, $t1, 4            # Move to the next word in output buffer
 
     j copy_header
 
 done_copy_header:
     sub $s5, $s0, 44        #data to reverse
+    add $t0, $s1, 44        # point @audio data skip header
+    add $t1, $s7, 44        # point @ same position, @end of the header
 
-    add $t0, $t0, $s5       # adding amount of data to reverse, pointing @the end
-    sub $t0, $t0, 4         # point to last byte
+    add $t7, $t0, $s5       # Move t0 to the end of the data in input buffer
+    sub $t7, $t7, 2         # point to last byte
 
 copy_reverse:
 
     beqz $s5, done_copy_reverse
 
-    lb $a0, 0($t0)
-    lb $a1, 1($t0)
+    lb $a0, 0($t7)      # Load byte from end of input buffer
+    lb $a1, 1($t7)      # Store byte at start of output buffer
 
-    sb $a1, 0($s7)
-    sb $a0, 1($s7)
+    sb $a1, 0($t1)
+    sb $a0, 1($t1)
 
-    sub $s5, $s5, 2
-    sub $t0, $t0, 2
-    addi $s7, $s7, 1
+    sub $s5, $s5, 2     # decrement counter
+    sub $t7, $t7, 2     # move the input pointer downwards by 2 bytes
+    addi $t1, $t1, 2    # move out put pointer upwards by 2 bytes
 
     j copy_reverse
 
 done_copy_reverse:
-    j open_for_writing
-
-    open_for_writing:
+    #open_for_writing
         li $v0, 13
         la $a0, out_fileName
-        # li $a1, 577             # write only mode or create the file
-        li $a1, 0x41
-        # li $a2, 644             # file permissions 0644 (read/write)
+        li $a1, 0x41            # write | O_CREAT
         li $a2, 0x1ff
         syscall
         move $s3, $v0           # store output file descriptor
 
-        sub $s7, $s7, $s0       # by now, pointing @end... minus file size then point @beginning
+        #sub $s7, $s7, $s0       # by now, pointing @end... minus file size then point @beginning
 
     write_heap2_to_outfile:
         li $v0, 15
         move $a0, $s3
-        move $a1, $s7              # buffer with the data   =------ must be second buffer
+        move $a1, $s7              # buffer with the data (heap2)
         move $a2, $s0                 # write the first 44 bytes (header)
         syscall
 
