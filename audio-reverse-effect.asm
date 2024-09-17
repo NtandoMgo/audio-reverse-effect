@@ -1,33 +1,34 @@
 .data
     in_fileName: .space 100      # Space for input filename
     out_fileName: .space 100     # Space for output filename
+    err_msg: .asciiz "Error opening file\n"   # Error message
 
 .text
 main:
-# Get input file name
+    # Get input file name
     li $v0, 8                    # syscall to read string
     la $a0, in_fileName           # input file name destination
     li $a1, 100                   # maximum number of characters
     syscall
 
-# Remove newline from input file name
+    # Remove newline from input file name
     jal remove_newline
 
-# Get output file name
+    # Get output file name
     li $v0, 8                   
     la $a0, out_fileName          # output file name destination
     li $a1, 100                   # maximum number of characters
     syscall
 
-# Remove newline from output file name
+    # Remove newline from output file name
     jal remove_newline
 
-# get file size
+    # Get file size
     li $v0, 5
     syscall 
     move $s0, $v0       # file size (in bytes) in $s0
 
-# Allocate memory for file size, for now just a sample size
+    # Allocate memory for file size
     li $v0, 9                   
     move $a0, $s0                
     syscall
@@ -41,9 +42,9 @@ open_file:
     li $a2, 0                    # default flags
     syscall
 
-# Check if file opened successfully
+    # Check if file opened successfully
     bltz $v0, file_error          # if file descriptor < 0, there was an error
-    move $t0, $v0                # store file descriptor in $s3
+    move $t0, $v0                # store file descriptor
 
 read_file:
     # Read from input file
@@ -53,15 +54,19 @@ read_file:
     move $a2, $s0                # number of bytes to read
     syscall
 
-
-     close_file:
+    # Close input file after reading
+close_file:
     li $v0, 16
     move $a0, $t0
     syscall
 
+    # Reverse audio data
     jal do_the_reverse
 
-    j exit
+    # Exit
+exit:
+    li $v0, 10                   # syscall to exit
+    syscall
 
 file_error:
     # Handle file open error
@@ -89,64 +94,61 @@ rmv_it:
 done_rmv_newline:
     jr $ra                       # return to main program
 
-exit:
-    li $v0, 10                   # syscall to exit
-    syscall
-
 ##########################
 # $s0 - file size
 # $s1 - input buffer memory
-# $s2 - 
 # $s3 - output file descriptor
 ##########################
 
 do_the_reverse:
-    move $t0, $s1     # in buffer memory address
-    #li $t2, 44          # track first 44 to be written as is
-    #la $t1, out_fileName    # out path address
+    move $t0, $s1     # input buffer memory address (start)
 
+    # Open output file for writing
 open_for_writing:
     li $v0, 13
     la $a0, out_fileName
     li $a1, 577             # write only mode or create the file
-    li $a2, 644                  # file permissions 0644 (read/write)
+    li $a2, 644             # file permissions 0644 (read/write)
     syscall
-    move $s3, $v0                # store output file descriptor
+    move $s3, $v0           # store output file descriptor
 
-# # write the first 44 bytes unchanged
-#     li $v0, 15
-#     move $a0, $s3
-#     move $a1, $s1              # buffer with the data
-#     li $a2, 44                  # write the first 44 bytes
-#     syscall
+    # Write the first 44 bytes unchanged (header)
+write_header:
+    li $v0, 15
+    move $a0, $s3
+    move $a1, $s1              # buffer with the data
+    li $a2, 44                 # write the first 44 bytes (header)
+    syscall
 
+    # Reverse the audio data
 reverse_:
-    add $t0, $t0, $s0           # address of input buffer + size---- move to the end
-    sub $t0, $t0, 1             # minize 1 to point to last byte
+    add $t0, $t0, $s0           # address of input buffer + size, move to the end
+    sub $t0, $t0, 1             # point to the last byte
 
-    addi $t1, $s1, 44           # starting point, after header
-    sub $t2, $s0, 44            # calc num of bytes to reverse
+    addi $t1, $s1, 44           # starting point after header
+    sub $t2, $s0, 44            # calculate the number of bytes to reverse
 
 reverse_loop:
     blez $t2, done_reverse
 
-    lb $t5, 0($t0)              # load the last byte at any moment
-    sb $t5, 0($t1)              # store the last byte at front (rewriting the input file)
-    addi $t0, $t0, -1           # move to load the next byte from end
-    addi $t1, $t1, 1           # increment to store at the next location
-    addi $t2, $t2, -1           # decrement tracker/counter to know when done reversing
+    lb $t5, 0($t0)              # load the last byte
+    sb $t5, 0($t1)              # store the byte in the reversed position
+    addi $t0, $t0, -1           # move backwards in input buffer
+    addi $t1, $t1, 1            # move forwards in output buffer
+    addi $t2, $t2, -1           # decrement the reverse byte count
     j reverse_loop
 
-done_reverse:               # Write the reversed data to the output file
+# Write the reversed data after the header
+done_reverse:               
     li $v0, 15
     move $a0, $s3
-    #addi $a1, $s1, 44       # point to reverse data after the header
-    move $a1, $s1           # everthing to the new file
-    #sub $a2, $s0, 44        # write remaining bytes -- the reversed
-    move $a2, $s0           # bytes to write are same as read from input file (size of input file)
+    addi $a1, $s1, 44        # point to reversed data after the header
+    sub $a2, $s0, 44         # write the remaining reversed bytes (excluding the header)
+    syscall
 
-     jr $ra                 # return to main program
+close_out_file:
+    li $v0, 16
+    move $a0, $s3
+    syscall
 
-.data
-    err_msg: .asciiz "Error opening file\n"
-
+    jr $ra                   # return to main program
