@@ -12,6 +12,7 @@ main:
     syscall
 
     # Remove newline from input file name
+    la $a0, in_fileName           # pass input file name address
     jal remove_newline
 
     # Get output file name
@@ -21,6 +22,7 @@ main:
     syscall
 
     # Remove newline from output file name
+    la $a0, out_fileName          # pass output file name address
     jal remove_newline
 
     # Get file size
@@ -28,11 +30,17 @@ main:
     syscall 
     move $s0, $v0       # file size (in bytes) in $s0
 
-    # Allocate memory for file size
+    # Allocate memory for file size, heap 1
     li $v0, 9                   
     move $a0, $s0                
     syscall
     move $s1, $v0                # store the address of allocated memory in $s1
+
+    # Allocate memory for file size, heap 2
+    li $v0, 9                   
+    move $a0, $s0                
+    syscall
+    move $s7, $v0                # store the address of allocated memory in $s7
 
 open_file:
     # Open input file
@@ -76,13 +84,14 @@ file_error:
     j exit
 
 remove_newline:
-    la $t0, in_fileName           # load the filename address (modify for output later)
+    # Remove newline character from a string (input or output file)
+    la $t0, 0($a0)               # load the string address (passed in $a0)
 
 find_newline:
-    lb $a0, 0($t0)               # load byte from filename
+    lb $t1, 0($t0)               # load byte from the string
 
-    beqz $a0, done_rmv_newline    # if null terminator found, end
-    beq $a0, 0x0A, rmv_it         # if newline character (0x0A), remove it
+    beqz $t1, done_rmv_newline    # if null terminator found, end
+    beq $t1, 0x0A, rmv_it         # if newline character (0x0A), remove it
 
     addi $t0, $t0, 1             # move to next character
     j find_newline
@@ -96,59 +105,159 @@ done_rmv_newline:
 
 ##########################
 # $s0 - file size
-# $s1 - input buffer memory
+# $s1 - input buffer memory, heap 1
 # $s3 - output file descriptor
+# $s7 - heap 2
 ##########################
 
 do_the_reverse:
     move $t0, $s1     # input buffer memory address (start)
 
+    li $a0, 11        # tracker for copying header (11 - words) 44/4 = 11
+copy_header:
+
+    beqz $a0, done_copy_header
+
+    lw $a1, 0($t0)
+    sw $a1, 0($s7)
+
+    sub $a0, $a0, 1
+    addi $t0, $t0, 4
+    addi $s7, $s7, 4
+
+    j copy_header
+
+done_copy_header:
+    sub $s5, $s0, 44        #data to reverse
+
+    add $t0, $t0, $s5       # adding amount of data to reverse, pointing @the end
+    sub $t0, $t0, 4         # point to last byte
+
+copy_reverse:
+
+    beqz $s5, done_copy_reverse
+
+    lb $a0, 0($t0)
+    lb $a1, 1($t0)
+
+    sb $a1, 0($s7)
+    sb $a0, 1($s7)
+
+    sub $s5, $s5, 2
+    sub $t0, $t0, 2
+    addi $s7, $s7, 1
+
+    j copy_reverse
+
+done_copy_reverse:
+    j open_for_writing
+
+    open_for_writing:
+        li $v0, 13
+        la $a0, out_fileName
+        # li $a1, 577             # write only mode or create the file
+        li $a1, 0x41
+        # li $a2, 644             # file permissions 0644 (read/write)
+        li $a2, 0x1ff
+        syscall
+        move $s3, $v0           # store output file descriptor
+
+        sub $s7, $s7, $s0       # by now, pointing @end... minus file size then point @beginning
+
+    write_heap2_to_outfile:
+        li $v0, 15
+        move $a0, $s3
+        move $a1, $s7              # buffer with the data   =------ must be second buffer
+        move $a2, $s0                 # write the first 44 bytes (header)
+        syscall
+
+    close_out_file:
+        li $v0, 16
+        move $a0, $s3
+        syscall
+
+        j exit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     # Open output file for writing
-open_for_writing:
-    li $v0, 13
-    la $a0, out_fileName
-    li $a1, 577             # write only mode or create the file
-    li $a2, 644             # file permissions 0644 (read/write)
-    syscall
-    move $s3, $v0           # store output file descriptor
+# open_for_writing:
+#     li $v0, 13
+#     la $a0, out_fileName
+#     # li $a1, 577             # write only mode or create the file
+#     li $a1, 0x41
+#     # li $a2, 644             # file permissions 0644 (read/write)
+#     li $a2, 0x1ff
+#     syscall
+#     move $s3, $v0           # store output file descriptor
 
-    # Write the first 44 bytes unchanged (header)
-write_header:
-    li $v0, 15
-    move $a0, $s3
-    move $a1, $s1              # buffer with the data
-    li $a2, 44                 # write the first 44 bytes (header)
-    syscall
+#     # Write the first 44 bytes unchanged (header)
+# write_header:
+#     li $v0, 15
+#     move $a0, $s3
+#     move $a1, $s1              # buffer with the data   =------ must be second buffer
+#     li $a2, 44                 # write the first 44 bytes (header)
+#     syscall
 
-    # Reverse the audio data
-reverse_:
-    add $t0, $t0, $s0           # address of input buffer + size, move to the end
-    sub $t0, $t0, 1             # point to the last byte
+#     # Reverse the audio data
+# reverse_:
+#     add $t0, $t0, $s0           # address of input buffer + size, move to the end
+#     sub $t0, $t0, 1             # point to the last byte
 
-    addi $t1, $s1, 44           # starting point after header
-    sub $t2, $s0, 44            # calculate the number of bytes to reverse
+#     addi $t1, $s1, 44           # starting point after header
+#     sub $t2, $s0, 44            # calculate the number of bytes to reverse
 
-reverse_loop:
-    blez $t2, done_reverse
+# reverse_loop:
+#     blez $t2, done_reverse
 
-    lb $t5, 0($t0)              # load the last byte
-    sb $t5, 0($t1)              # store the byte in the reversed position
-    addi $t0, $t0, -1           # move backwards in input buffer
-    addi $t1, $t1, 1            # move forwards in output buffer
-    addi $t2, $t2, -1           # decrement the reverse byte count
-    j reverse_loop
+#     lb $t5, 0($t0)              # load the last byte
+#     sb $t5, 0($t1)              # store the byte in the reversed position
+#     addi $t0, $t0, -1           # move backwards in input buffer
+#     addi $t1, $t1, 1            # move forwards in output buffer
+#     addi $t2, $t2, -1           # decrement the reverse byte count
+#     j reverse_loop
 
-# Write the reversed data after the header
-done_reverse:               
-    li $v0, 15
-    move $a0, $s3
-    addi $a1, $s1, 44        # point to reversed data after the header
-    sub $a2, $s0, 44         # write the remaining reversed bytes (excluding the header)
-    syscall
+# # Write the reversed data after the header
+# done_reverse:               
+#     li $v0, 15
+#     move $a0, $s3
+#     addi $a1, $s1, 44        # point to reversed data after the header
+#     sub $a2, $s0, 44         # write the remaining reversed bytes (excluding the header)
+#     syscall
 
-close_out_file:
-    li $v0, 16
-    move $a0, $s3
-    syscall
+# close_out_file:
+#     li $v0, 16
+#     move $a0, $s3
+#     syscall
 
-    jr $ra                   # return to main program
+#     jr $ra                   # return to main program
